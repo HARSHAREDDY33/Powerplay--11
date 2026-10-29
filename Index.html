@@ -1,0 +1,204 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>PowerPlay XI | 3D Cricket</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#07130f;color:#fff;font-family:Arial,sans-serif}
+header{padding:12px;text-align:center;background:#0d251b;border-bottom:2px solid #a6f36b}
+h1{margin:0;color:#a6f36b;font-size:25px;letter-spacing:2px}
+header p{margin:5px 0 0;color:#b9d0c0;font-size:12px}
+#scene{width:100%;height:48vh;min-height:280px;position:relative;background:#101d16}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+#hud{position:absolute;top:10px;left:10px;right:10px;display:flex;justify-content:space-between;gap:8px;pointer-events:none}
+.box{background:#07130fdd;padding:9px 12px;border:1px solid #6c965e;border-radius:10px}
+#score{font-size:23px;font-weight:bold;color:#a6f36b}
+.small{font-size:11px;color:#c6d6cb;margin-top:3px}
+#message{padding:10px 12px;text-align:center;background:#10291f;color:#d9e9dd;font-size:13px;min-height:38px}
+main{max-width:700px;margin:auto;padding:12px}
+h2{font-size:14px;color:#a6f36b;letter-spacing:1px;margin:5px 0 10px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:9px}
+button{flex:1;min-width:100px;padding:12px 8px;border:1px solid #42694d;border-radius:10px;background:#173b2a;color:white;font-weight:bold;font-size:13px;cursor:pointer}
+button.primary{background:#a6f36b;color:#102017;border-color:#a6f36b}
+button:disabled{opacity:.4}
+#powerbar{height:12px;background:#294335;border-radius:8px;overflow:hidden;margin:7px 0}
+#powerfill{height:100%;width:0;background:linear-gradient(90deg,#a6f36b,#ffe86b);transition:width .25s}
+footer{text-align:center;color:#91a79a;font-size:11px;padding:12px}
+</style>
+</head>
+<body>
+<header>
+<h1>POWERPLAY XI</h1>
+<p>3D CRICKET EXPERIENCE · YOUR INNINGS STARTS NOW</p>
+</header><div id="scene">
+<div id="hud">
+<div class="box"><div class="small">YOUR SCORE</div><div id="score">0 / 0</div><div class="small">Overs <span id="overs">0.0</span> · Target <span id="target">—</span></div></div>
+<div class="box"><div class="small">POWER SURGE</div><div id="power">0%</div><div id="powerbar"><div id="powerfill"></div></div></div>
+</div>
+</div>
+<div id="message">Loading 3D stadium…</div><main>
+<h2>CAMERA</h2>
+<div class="row">
+<button onclick="setCamera('batter')">🎥 Batter View</button>
+<button onclick="setCamera('broadcast')">📺 Broadcast View</button>
+</div><h2>CHOOSE YOUR SHOT</h2>
+<div class="row">
+<button onclick="playShot('defensive')">🛡 Defensive</button>
+<button class="primary" onclick="playShot('drive')">🏏 Drive</button>
+</div>
+<div class="row">
+<button onclick="playShot('lofted')">🚀 Lofted Shot</button>
+<button onclick="playShot('quick')">🏃 Quick Single</button>
+</div>
+<div class="row">
+<button class="primary" id="surgeBtn" onclick="activateSurge()" disabled>⚡ Activate Power Surge</button>
+<button onclick="newInnings()">↻ New Innings</button>
+</div>
+<div class="small">12 balls · 2 overs · Fictional teams · Prototype version</div>
+</main>
+<footer>PowerPlay XI · Original fan-made game prototype</footer><script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script><script>
+let scene,camera,renderer,ball,batterGroup,bowlerGroup;
+let runs=0,wickets=0,balls=0,power=0,surge=false,finished=false;
+let cameraMode='broadcast',animating=false,ballStart=null,ballEnd=null,ballProgress=0;
+const $=id=>document.getElementById(id);
+
+function say(t){$('message').textContent=t}
+function updateHUD(){
+ $('score').textContent=runs+' / '+wickets;
+ $('overs').textContent=Math.floor(balls/6)+'.'+balls%6;
+ $('power').textContent=power+'%';
+ $('powerfill').style.width=power+'%';
+ $('surgeBtn').disabled=power<100||surge||finished;
+ $('target').textContent='—';
+}
+function material(color,roughness=0.8){return new THREE.MeshStandardMaterial({color,roughness})}
+function addBox(parent,x,y,z,sx,sy,sz,color){
+ const m=new THREE.Mesh(new THREE.BoxGeometry(sx,sy,sz),material(color));
+ m.position.set(x,y,z);parent.add(m);return m;
+}
+function makePlayer(x,z,shirt,batting=false){
+ const g=new THREE.Group();g.position.set(x,0,z);scene.add(g);
+ const skin=material(0xc58d63),clothes=material(shirt),pants=material(0xe2e4df);
+ const body=new THREE.Mesh(new THREE.CapsuleGeometry(.28,.65,4,8),clothes);
+ body.position.y=1.15;g.add(body);
+ const head=new THREE.Mesh(new THREE.SphereGeometry(.22,12,10),skin);
+ head.position.y=1.82;g.add(head);
+ const leg1=addBox(g,-.13,.43,0,.16,.75,.19,0x27364a);
+ const leg2=addBox(g,.13,.43,0,.16,.75,.19,0x27364a);
+ const arm1=addBox(g,-.37,1.23,0,.13,.58,.14,shirt);
+ const arm2=addBox(g,.37,1.23,0,.13,.58,.14,shirt);
+ if(batting){
+  const bat=addBox(g,.42,.86,-.38,.09,.95,.12,0xc99b56);
+  bat.rotation.x=-.3;bat.rotation.z=-.3;g.userData.bat=bat;
+ }
+ g.userData={...(g.userData||{}),body,arm1,arm2,leg1,leg2};
+ return g;
+}
+function init(){
+ const root=$('scene');
+ if(!window.THREE){say('3D library failed to load. Check your internet connection and reload.');return}
+ scene=new THREE.Scene();scene.background=new THREE.Color(0x9bc8e5);
+ scene.fog=new THREE.Fog(0x9bc8e5,35,90);
+ camera=new THREE.PerspectiveCamera(55,root.clientWidth/root.clientHeight,.1,200);
+ renderer=new THREE.WebGLRenderer({antialias:true,alpha:false});
+ renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,1.6));
+ renderer.setSize(root.clientWidth,root.clientHeight);
+ renderer.shadowMap.enabled=true;root.prepend(renderer.domElement);
+ scene.add(new THREE.HemisphereLight(0xffffff,0x34452c,2));
+ const sun=new THREE.DirectionalLight(0xffffff,2.4);sun.position.set(-8,16,5);scene.add(sun);
+ // stadium field
+ const grass=new THREE.Mesh(new THREE.CircleGeometry(30,64),material(0x26783d));
+ grass.rotation.x=-Math.PI/2;grass.position.y=-.06;scene.add(grass);
+ for(let i=0;i<18;i++){
+  const a=i*Math.PI*2/18;
+  const stand=new THREE.Mesh(new THREE.BoxGeometry(3.3,2.6,8),material(i%2?0x34485a:0x263847));
+  stand.position.set(Math.cos(a)*26,1.1,Math.sin(a)*26);stand.lookAt(0,1,0);scene.add(stand);
+  for(let j=0;j<3;j++)for(let k=0;k<7;k++){
+   const dot=new THREE.Mesh(new THREE.SphereGeometry(.09,5,5),material([0xe4e9ee,0xf5c45a,0xe76d6d][(j+k)%3]));
+   dot.position.set(Math.cos(a)* (23.2+j*.4),2.3+k*.13,Math.sin(a)*(23.2+j*.4));scene.add(dot);
+  }
+ }
+ const pitch=addBox(scene,0,.015,0,3,.06,19,0xcbb58b);
+ for(let z of [-9.3,9.3]){
+  for(let x of [-.8,0,.8])addBox(scene,x,.55,z,.09,1.1,.09,0xf3ead6);
+  addBox(scene,0,.04,z,2.5,.02,.12,0xffffff);
+ }
+ // pitch grass stripes
+ for(let i=-3;i<=3;i++)addBox(scene,i*3,.005,0,1.3,.008,50,0x2a8240);
+ batterGroup=makePlayer(0,7,0x2259c4,true);
+ bowlerGroup=makePlayer(0,-7,0xd72d32,false);
+ ball=new THREE.Mesh(new THREE.SphereGeometry(.16,16,12),material(0xc92828,.4));
+ ball.position.set(0,1,-6);scene.add(ball);
+ // simple floodlight poles
+ for(let x of [-19,19])for(let z of [-18,18]){
+  addBox(scene,x,7,z,.18,14,.18,0x67747c);
+  const lamp=new THREE.PointLight(0xffffff,1.4,24);lamp.position.set(x,13,z);scene.add(lamp);
+ }
+ setCamera('broadcast');say('3D stadium ready! Choose a shot to face the next delivery.');updateHUD();animate();
+}
+function setCamera(mode){
+ cameraMode=mode;
+ if(!camera||!batterGroup)return;
+ if(mode==='batter'){camera.position.set(0,3.3,12.8);camera.lookAt(0,1,-8);say('Batter view: watch the bowler and time your shot.')}
+ else{camera.position.set(13,10,17);camera.lookAt(0,0,0);say('Broadcast view: follow the whole pitch.')}
+}
+function playShot(type){
+ if(!scene){say('Please wait for the 3D stadium to load.');return}
+ if(finished||animating)return;
+ animating=true;balls++;
+ const r=Math.random();let score=0,out=false,desc='';
+ const probs={defensive:.06,drive:.09,lofted:.19,quick:.08};
+ if(r<probs[type]){out=true;desc='OUT! The bowler wins this ball.'}
+ else if(type==='defensive'){score=r<.56?0:1;desc=score?'Safe single.':'Solid defence, no run.'}
+ else if(type==='quick'){score=r<.78?1:2;desc=score+' run'+(score>1?'s':'')+' taken with quick running.'}
+ else if(type==='drive'){score=r<.30?1:r<.53?2:r<.82?4:6;desc=score===6?'SIX! Beautiful hit!':score===4?'FOUR! Driven to the boundary.':score+' run'+(score===1?'':'s')+'.'}
+ else{score=r<.25?1:r<.43?2:r<.73?4:6;desc=score===6?'MASSIVE SIX!':score===4?'FOUR! Lofted over the field.':score+' run'+(score===1?'':'s')+'.'}
+ if(out){wickets++;batterGroup.rotation.z=.4}
+ else{
+  if(surge){score+=2;surge=false;desc+=' POWER SURGE +2!'}
+  runs+=score;
+  if(score>=6)power=Math.min(100,power+40);
+  else if(score>=4)power=Math.min(100,power+25);
+ }
+ ballStart=ball.position.clone();ballEnd=out?new THREE.Vector3(1,1,1):new THREE.Vector3((Math.random()-.5)*19,.2+Math.random()*2,-12-Math.random()*8);
+ ballProgress=0;ball.userData.outcome=out?'out':'hit';ball.userData.desc=desc;
+ bowlerGroup.rotation.x=-.4;
+ say('Ball '+Math.floor((balls-1)/6)+'.'+((balls-1)%6+1)+' — '+desc);
+ if(wickets>=10||balls>=12)finished=true;
+ updateHUD();
+}
+function activateSurge(){
+ if(power<100||surge||finished)return;
+ power=0;surge=true;updateHUD();say('⚡ POWER SURGE ACTIVATED! Next successful shot earns +2 runs!');
+}
+function newInnings(){
+ runs=0;wickets=0;balls=0;power=0;surge=false;finished=false;animating=false;
+ ball.position.set(0,1,-6);batterGroup.rotation.set(0,0,0);bowlerGroup.rotation.set(0,0,0);
+ updateHUD();say('New innings! Choose your shot.'); 
+}
+function animate(){
+ requestAnimationFrame(animate);
+ if(ball&&animating){
+  ballProgress+=.018;
+  const t=Math.min(ballProgress,1);
+  if(ballEnd){
+   ball.position.x=THREE.MathUtils.lerp(ballStart.x,ballEnd.x,t);
+   ball.position.z=THREE.MathUtils.lerp(ballStart.z,ballEnd.z,t);
+   ball.position.y=ballStart.y+(ballEnd.y-ballStart.y)*t+Math.sin(t*Math.PI)*4.2;
+  }
+  if(t>=1){
+   animating=false;ball.position.set(0,1,-6);
+   if(finished)say('Innings complete! Final score '+runs+'/'+wickets+'. Tap New Innings to play again.');
+   else if(!($('message').textContent.includes('POWER SURGE ACTIVATED')))say(ball.userData.desc+' Ready for the next ball.');
+  }
+ }
+ if(renderer&&scene&&camera)renderer.render(scene,camera);
+}
+window.addEventListener('resize',()=>{
+ if(!renderer||!camera)return;
+ const root=$('scene');camera.aspect=root.clientWidth/root.clientHeight;camera.updateProjectionMatrix();renderer.setSize(root.clientWidth,root.clientHeight);
+});
+init();
+</script></body>
+  </html>
